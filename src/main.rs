@@ -33,10 +33,17 @@ pub struct PlayerConfig {
 }
 
 #[derive(Deserialize)]
+struct StaticConfig {
+    max_vel: f32,
+    time_to_full: f32,
+}
+
+#[derive(Deserialize)]
 pub struct Config {
     gravity: f32,
     bounciness: f32,
     friction: f32,
+    r#static: StaticConfig,
     fov: f32,
     player: PlayerConfig,
     level_mesh: LevelMeshConfig,
@@ -148,6 +155,7 @@ struct Player {
     pos: vec2<f32>,
     vel: vec2<f32>,
     radius: f32,
+    r#static: f32,
 }
 
 pub struct Game {
@@ -217,6 +225,7 @@ impl Game {
                 pos: vec2::ZERO,
                 vel: vec2::ZERO,
                 radius: config.player.radius,
+                r#static: 0.0,
             },
             assets,
             config,
@@ -242,8 +251,13 @@ impl geng::State for Game {
 
     fn fixed_update(&mut self, delta_time: f64) {
         let delta_time = delta_time as f32;
-        self.player.vel.y -= self.config.gravity * delta_time;
-        self.player.pos += self.player.vel * delta_time;
+        self.player.r#static =
+            (self.player.r#static + delta_time / self.config.r#static.time_to_full).min(1.0);
+        if self.player.vel.len() > self.config.r#static.max_vel {
+            self.player.r#static = 0.0;
+        }
+        self.player.vel.y -= self.config.gravity * delta_time * (1.0 - self.player.r#static);
+        self.player.pos += self.player.vel * delta_time * (1.0 - self.player.r#static);
 
         let target_radius = if self
             .geng
@@ -262,6 +276,9 @@ impl geng::State for Game {
         };
         let player_scaling_speed =
             (target_radius - self.player.radius) * self.config.player.scaling_speed;
+        if player_scaling_speed.abs() > self.config.r#static.max_vel {
+            self.player.r#static = 0.0;
+        }
         let old_radius = self.player.radius;
         let scale_origin = self.player.pos
             + (self.screen_to_world(self.geng.window().cursor_position().unwrap_or(vec2::ZERO))
@@ -370,6 +387,7 @@ impl geng::State for Game {
             &self.quad,
             (
                 ugli::uniforms! {
+                    u_static: self.player.r#static,
                     u_pos: self.player.pos,
                     u_vel: self.player.vel,
                     u_radius: self.player.radius,
@@ -409,6 +427,7 @@ impl geng::State for Game {
                                 pos: self.screen_to_world(screen_pos),
                                 vel: vec2::ZERO,
                                 radius: self.config.player.radius,
+                                r#static: 0.0,
                             };
                         }
                     }

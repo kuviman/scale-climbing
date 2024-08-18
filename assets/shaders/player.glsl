@@ -14,10 +14,14 @@ void main() {
 #endif
 
 #ifdef FRAGMENT_SHADER
+uniform float u_static;
 void main() {
     if (length(v_uv) > 1.0) {
         discard;
     }
-    gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+    vec3 normal_color = vec3(1.0, 1.0, 1.0);
+    vec3 static_color = vec3(0.2, 0.2, 1.0);
+    vec3 color = normal_color * (1.0 - u_static) + static_color * u_static;
+    gl_FragColor = vec4(color, 1.0);
 }
 #endif

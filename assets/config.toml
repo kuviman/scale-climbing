@@ -3,6 +3,10 @@ gravity = 5
 bounciness = 0.3
 friction = 0.9
 
+[static]
+max_vel = 0.1
+time_to_full = 1
+
 [level_mesh]
 max_distance = 0.05
 
