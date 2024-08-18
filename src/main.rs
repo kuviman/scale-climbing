@@ -44,6 +44,7 @@ struct StaticConfig {
 struct EditorConfig {
     snap_distance: f32,
     cursor_rotation_speed: f32,
+    camera_speed: f32,
 }
 
 #[derive(Deserialize)]
@@ -284,6 +285,18 @@ impl Game {
             ui.checkbox(&mut self.editor_mode, "Editor mode");
         });
     }
+
+    fn hovered_surface(&self, cursor: vec2<f32>) -> Option<usize> {
+        self.level
+            .surfaces
+            .iter()
+            .enumerate()
+            .filter(|(_index, surface)| {
+                surface.to(cursor).distance < self.config.editor.snap_distance
+            })
+            .min_by_key(|(_index, surface)| r32(surface.to(cursor).distance))
+            .map(|(index, _)| index)
+    }
 }
 
 impl geng::State for Game {
@@ -292,6 +305,18 @@ impl geng::State for Game {
         self.time += delta_time;
         if self.editor_mode {
             self.player = None;
+            if self.geng.window().is_key_pressed(geng::Key::W) {
+                self.camera.center.y += self.config.editor.camera_speed * delta_time;
+            }
+            if self.geng.window().is_key_pressed(geng::Key::A) {
+                self.camera.center.x -= self.config.editor.camera_speed * delta_time;
+            }
+            if self.geng.window().is_key_pressed(geng::Key::S) {
+                self.camera.center.y -= self.config.editor.camera_speed * delta_time;
+            }
+            if self.geng.window().is_key_pressed(geng::Key::D) {
+                self.camera.center.x += self.config.editor.camera_speed * delta_time;
+            }
         }
         if let Some(player) = &self.player {
             self.camera.center += (player.pos - self.camera.center)
@@ -454,12 +479,14 @@ impl geng::State for Game {
         }
 
         if self.editor_mode {
-            let cursor_pos =
+            let cursor =
+                self.screen_to_world(self.geng.window().cursor_position().unwrap_or(vec2::ZERO));
+            let snapped_cursor =
                 self.snapped(self.geng.window().cursor_position().unwrap_or(vec2::ZERO));
 
             if let Some(start) = self.start_draw {
-                let v = cursor_pos - start;
-                let matrix = mat3::translate((cursor_pos + start) / 2.0)
+                let v = snapped_cursor - start;
+                let matrix = mat3::translate((snapped_cursor + start) / 2.0)
                     * mat3::from_orts(
                         v.normalize_or_zero()
                             * (v.len() / 2.0 + self.config.editor.snap_distance / 2.0),
@@ -481,41 +508,79 @@ impl geng::State for Game {
                         ..default()
                     },
                 );
-            }
-
-            if true {
-                let cursor_matrix = mat3::translate(cursor_pos)
-                    * mat3::rotate(Angle::from_degrees(
-                        self.config.editor.cursor_rotation_speed * self.time,
-                    ))
-                    * mat3::scale_uniform(self.config.editor.snap_distance / 2.0);
-                ugli::draw(
-                    framebuffer,
-                    &self.assets.shaders.selection,
-                    ugli::DrawMode::TriangleFan,
-                    &self.quad,
-                    (
-                        ugli::uniforms! {
-                            u_model_matrix: cursor_matrix,
+            } else {
+                if let Some(surface) = self.hovered_surface(cursor) {
+                    let surface = &self.level.surfaces[surface];
+                    let v = surface.ends[1] - surface.ends[0];
+                    let matrix = mat3::translate((surface.ends[0] + surface.ends[1]) / 2.0)
+                        * mat3::from_orts(
+                            v.normalize_or_zero()
+                                * (v.len() / 2.0 + self.config.editor.snap_distance / 2.0),
+                            v.normalize_or_zero().rotate_90() * self.config.editor.snap_distance
+                                / 2.0,
+                        );
+                    ugli::draw(
+                        framebuffer,
+                        &self.assets.shaders.selection,
+                        ugli::DrawMode::TriangleFan,
+                        &self.quad,
+                        (
+                            ugli::uniforms! {
+                                u_model_matrix: matrix,
+                            },
+                            &uniforms,
+                        ),
+                        ugli::DrawParameters {
+                            blend_mode: Some(ugli::BlendMode {
+                                rgb: ugli::ChannelBlendMode {
+                                    src_factor: ugli::BlendFactor::OneMinusDstColor,
+                                    dst_factor: ugli::BlendFactor::Zero,
+                                    equation: ugli::BlendEquation::Add,
+                                },
+                                alpha: ugli::ChannelBlendMode {
+                                    src_factor: ugli::BlendFactor::Zero,
+                                    dst_factor: ugli::BlendFactor::One,
+                                    equation: ugli::BlendEquation::Add,
+                                },
+                            }),
+                            ..default()
                         },
-                        &uniforms,
-                    ),
-                    ugli::DrawParameters {
-                        blend_mode: Some(ugli::BlendMode {
-                            rgb: ugli::ChannelBlendMode {
-                                src_factor: ugli::BlendFactor::OneMinusDstColor,
-                                dst_factor: ugli::BlendFactor::Zero,
-                                equation: ugli::BlendEquation::Add,
+                    );
+                }
+                if true {
+                    let cursor_matrix = mat3::translate(snapped_cursor)
+                        * mat3::rotate(Angle::from_degrees(
+                            self.config.editor.cursor_rotation_speed * self.time,
+                        ))
+                        * mat3::scale_uniform(self.config.editor.snap_distance / 2.0);
+                    ugli::draw(
+                        framebuffer,
+                        &self.assets.shaders.selection,
+                        ugli::DrawMode::TriangleFan,
+                        &self.quad,
+                        (
+                            ugli::uniforms! {
+                                u_model_matrix: cursor_matrix,
                             },
-                            alpha: ugli::ChannelBlendMode {
-                                src_factor: ugli::BlendFactor::Zero,
-                                dst_factor: ugli::BlendFactor::One,
-                                equation: ugli::BlendEquation::Add,
-                            },
-                        }),
-                        ..default()
-                    },
-                );
+                            &uniforms,
+                        ),
+                        ugli::DrawParameters {
+                            blend_mode: Some(ugli::BlendMode {
+                                rgb: ugli::ChannelBlendMode {
+                                    src_factor: ugli::BlendFactor::OneMinusDstColor,
+                                    dst_factor: ugli::BlendFactor::Zero,
+                                    equation: ugli::BlendEquation::Add,
+                                },
+                                alpha: ugli::ChannelBlendMode {
+                                    src_factor: ugli::BlendFactor::Zero,
+                                    dst_factor: ugli::BlendFactor::One,
+                                    equation: ugli::BlendEquation::Add,
+                                },
+                            }),
+                            ..default()
+                        },
+                    );
+                }
             }
         }
 
@@ -555,6 +620,17 @@ impl geng::State for Game {
                         .window()
                         .cursor_position()
                         .map(|pos| self.snapped(pos));
+                }
+                geng::Event::MousePress {
+                    button: geng::MouseButton::Right,
+                } => {
+                    let cursor = self.screen_to_world(
+                        self.geng.window().cursor_position().unwrap_or(vec2::ZERO),
+                    );
+                    if let Some(index) = self.hovered_surface(cursor) {
+                        self.level.surfaces.remove(index);
+                        self.update_level();
+                    }
                 }
                 geng::Event::MouseRelease { .. } => {
                     if let Some(start) = self.start_draw.take() {

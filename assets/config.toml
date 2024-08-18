@@ -25,3 +25,4 @@ hotspot = [16, 16]
 [editor]
 snap_distance = 0.2
 cursor_rotation_speed = 360
+camera_speed = 5
