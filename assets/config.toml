@@ -1,7 +1,10 @@
-fov = 10
 gravity = 5
 bounciness = 0.3
 friction = 0.9
+
+[camera]
+fov = 10
+speed = 2
 
 [static]
 max_vel = 0.1

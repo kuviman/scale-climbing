@@ -47,13 +47,19 @@ struct EditorConfig {
 }
 
 #[derive(Deserialize)]
+struct CameraConfig {
+    fov: f32,
+    speed: f32,
+}
+
+#[derive(Deserialize)]
 pub struct Config {
     editor: EditorConfig,
     gravity: f32,
     bounciness: f32,
     friction: f32,
     r#static: StaticConfig,
-    fov: f32,
+    camera: CameraConfig,
     player: PlayerConfig,
     level_mesh: LevelMeshConfig,
     cursor: CursorConfig,
@@ -218,7 +224,7 @@ impl Game {
             camera: Camera2d {
                 center: vec2::ZERO,
                 rotation: Angle::ZERO,
-                fov: Camera2dFov::MinSide(config.fov),
+                fov: Camera2dFov::MinSide(config.camera.fov),
             },
             quad: ugli::VertexBuffer::new_static(
                 geng.ugli(),
@@ -286,6 +292,10 @@ impl geng::State for Game {
         self.time += delta_time;
         if self.editor_mode {
             self.player = None;
+        }
+        if let Some(player) = &self.player {
+            self.camera.center += (player.pos - self.camera.center)
+                * (self.config.camera.speed * delta_time).min(1.0);
         }
     }
 
