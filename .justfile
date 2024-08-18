@@ -1,8 +1,8 @@
 default:
     echo "Look at the .justfile"
 
-run:
-    cargo run
+run *args:
+    cargo run -- {{args}}
 
 web:
     cargo geng run --platform web

@@ -6,6 +6,7 @@ struct Shaders {
     background: ugli::Program,
     surface_dist: ugli::Program,
     level: ugli::Program,
+    player: ugli::Program,
 }
 
 #[derive(geng::asset::Load)]
@@ -19,9 +20,23 @@ struct LevelMeshConfig {
 }
 
 #[derive(Deserialize)]
+pub struct CursorConfig {
+    hotspot: vec2<u16>,
+}
+
+#[derive(Deserialize)]
+pub struct PlayerConfig {
+    radius: f32,
+}
+
+#[derive(Deserialize)]
 pub struct Config {
+    gravity: f32,
+    bounciness: f32,
     fov: f32,
+    player: PlayerConfig,
     level_mesh: LevelMeshConfig,
+    cursor: CursorConfig,
 }
 
 #[derive(ugli::Vertex)]
@@ -32,6 +47,39 @@ struct QuadVertex {
 #[derive(Serialize, Deserialize)]
 struct Surface {
     ends: [vec2<f32>; 2],
+}
+
+struct To {
+    normal: vec2<f32>,
+    distance: f32,
+}
+
+impl Surface {
+    fn to(&self, p: vec2<f32>) -> To {
+        let [a, b] = self.ends;
+        if vec2::dot(a - b, p - b) < 0.0 {
+            return To {
+                normal: (p - b).normalize_or_zero(),
+                distance: (p - b).len(),
+            };
+        }
+        if vec2::dot(b - a, p - a) < 0.0 {
+            return To {
+                normal: (p - a).normalize_or_zero(),
+                distance: (p - a).len(),
+            };
+        }
+        let normal = (b - a).rotate_90().normalize();
+        let distance = vec2::dot(normal, p - a);
+        if distance > 0.0 {
+            To { normal, distance }
+        } else {
+            To {
+                normal: -normal,
+                distance: -distance,
+            }
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -88,6 +136,12 @@ impl LevelMesh {
     }
 }
 
+struct Player {
+    pos: vec2<f32>,
+    vel: vec2<f32>,
+    radius: f32,
+}
+
 pub struct Game {
     framebuffer_size: vec2<f32>,
     geng: Geng,
@@ -101,6 +155,7 @@ pub struct Game {
     start_draw: Option<vec2<f64>>,
     temp_texture: ugli::Texture,
     temp_renderbuffer: ugli::Renderbuffer<ugli::DepthStencilValue>,
+    player: Player,
 }
 
 impl Game {
@@ -113,6 +168,15 @@ impl Game {
         let config: Config = file::load_detect(run_dir().join("assets").join("config.toml"))
             .await
             .unwrap();
+
+        geng.window().set_cursor_type(geng::CursorType::Custom {
+            image: geng
+                .asset_manager()
+                .load(run_dir().join("assets").join("cursor.png"))
+                .await
+                .unwrap(),
+            hotspot: config.cursor.hotspot,
+        });
         let level = file::load_json(run_dir().join("assets").join("level.json"))
             .await
             .unwrap();
@@ -137,11 +201,16 @@ impl Game {
                     })
                     .collect(),
             ),
-            assets,
-            config,
             start_draw: None,
             temp_texture: ugli::Texture2d::new_with(geng.ugli(), vec2::splat(1), |_| Rgba::WHITE),
             temp_renderbuffer: ugli::Renderbuffer::new(geng.ugli(), vec2::splat(1)),
+            player: Player {
+                pos: vec2::ZERO,
+                vel: vec2::ZERO,
+                radius: config.player.radius,
+            },
+            assets,
+            config,
         }
     }
 
@@ -159,6 +228,24 @@ impl geng::State for Game {
     fn update(&mut self, delta_time: f64) {
         let delta_time = delta_time as f32;
         self.time += delta_time;
+    }
+
+    fn fixed_update(&mut self, delta_time: f64) {
+        let delta_time = delta_time as f32;
+        self.player.vel.y -= self.config.gravity * delta_time;
+        self.player.pos += self.player.vel * delta_time;
+
+        for surface in &self.level.surfaces {
+            let to = surface.to(self.player.pos);
+            if to.distance < self.player.radius {
+                let penetration = self.player.radius - to.distance;
+                self.player.pos += to.normal * penetration;
+                let delta_vel = vec2::dot(self.player.vel, to.normal);
+                if delta_vel < 0.0 {
+                    self.player.vel -= to.normal * delta_vel * (1.0 + self.config.bounciness);
+                }
+            }
+        }
     }
     fn draw(&mut self, framebuffer: &mut ugli::Framebuffer) {
         self.framebuffer_size = framebuffer.size().map(|x| x as f32);
@@ -232,6 +319,25 @@ impl geng::State for Game {
                 ..default()
             },
         );
+
+        ugli::draw(
+            framebuffer,
+            &self.assets.shaders.player,
+            ugli::DrawMode::TriangleFan,
+            &self.quad,
+            (
+                ugli::uniforms! {
+                    u_pos: self.player.pos,
+                    u_vel: self.player.vel,
+                    u_radius: self.player.radius,
+                },
+                &uniforms,
+            ),
+            ugli::DrawParameters {
+                blend_mode: Some(ugli::BlendMode::premultiplied_alpha()),
+                ..default()
+            },
+        );
     }
     fn handle_event(&mut self, event: geng::Event) {
         match event {
@@ -249,6 +355,18 @@ impl geng::State for Game {
                     }
                 }
             }
+            geng::Event::KeyPress { key } => match key {
+                geng::Key::R => {
+                    if let Some(screen_pos) = self.geng.window().cursor_position() {
+                        self.player = Player {
+                            pos: self.screen_to_world(screen_pos),
+                            vel: vec2::ZERO,
+                            radius: self.config.player.radius,
+                        };
+                    }
+                }
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -267,6 +385,7 @@ fn main() {
             let mut options = geng::ContextOptions::default();
             options.window.title = env!("CARGO_PKG_NAME").to_owned();
             options.with_cli(&cli.geng);
+            options.fixed_delta_time = 1.0 / 200.0;
             options
         },
         move |geng| async move {
