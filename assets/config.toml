@@ -1,1 +1,4 @@
 fov = 10
+
+[level_mesh]
+max_distance = 0.05
