@@ -55,6 +55,7 @@ struct CameraConfig {
 
 #[derive(Deserialize)]
 pub struct Config {
+    tick_distance: f32,
     editor: EditorConfig,
     gravity: f32,
     bounciness: f32,
@@ -191,6 +192,7 @@ pub struct Game {
     egui: EguiGeng,
     editor_mode: bool,
     cli: CliArgs,
+    unprocessed: f32,
 }
 
 impl Game {
@@ -250,6 +252,7 @@ impl Game {
             editor_mode: false,
             egui: EguiGeng::new(geng),
             cli,
+            unprocessed: 0.0,
         }
     }
 
@@ -297,35 +300,8 @@ impl Game {
             .min_by_key(|(_index, surface)| r32(surface.to(cursor).distance))
             .map(|(index, _)| index)
     }
-}
 
-impl geng::State for Game {
-    fn update(&mut self, delta_time: f64) {
-        let delta_time = delta_time as f32;
-        self.time += delta_time;
-        if self.editor_mode {
-            self.player = None;
-            if self.geng.window().is_key_pressed(geng::Key::W) {
-                self.camera.center.y += self.config.editor.camera_speed * delta_time;
-            }
-            if self.geng.window().is_key_pressed(geng::Key::A) {
-                self.camera.center.x -= self.config.editor.camera_speed * delta_time;
-            }
-            if self.geng.window().is_key_pressed(geng::Key::S) {
-                self.camera.center.y -= self.config.editor.camera_speed * delta_time;
-            }
-            if self.geng.window().is_key_pressed(geng::Key::D) {
-                self.camera.center.x += self.config.editor.camera_speed * delta_time;
-            }
-        }
-        if let Some(player) = &self.player {
-            self.camera.center += (player.pos - self.camera.center)
-                * (self.config.camera.speed * delta_time).min(1.0);
-        }
-    }
-
-    fn fixed_update(&mut self, delta_time: f64) {
-        let delta_time = delta_time as f32;
+    fn tick(&mut self, delta_time: f32) {
         let cursor_pos =
             self.screen_to_world(self.geng.window().cursor_position().unwrap_or(vec2::ZERO));
         if let Some(player) = &mut self.player {
@@ -381,6 +357,43 @@ impl geng::State for Game {
                     player.vel -=
                         along * along_vel.clamp_abs(normal_vel.abs() * self.config.friction);
                 }
+            }
+        }
+    }
+}
+
+impl geng::State for Game {
+    fn update(&mut self, delta_time: f64) {
+        let delta_time = delta_time as f32;
+        self.time += delta_time;
+        if self.editor_mode {
+            self.player = None;
+            if self.geng.window().is_key_pressed(geng::Key::W) {
+                self.camera.center.y += self.config.editor.camera_speed * delta_time;
+            }
+            if self.geng.window().is_key_pressed(geng::Key::A) {
+                self.camera.center.x -= self.config.editor.camera_speed * delta_time;
+            }
+            if self.geng.window().is_key_pressed(geng::Key::S) {
+                self.camera.center.y -= self.config.editor.camera_speed * delta_time;
+            }
+            if self.geng.window().is_key_pressed(geng::Key::D) {
+                self.camera.center.x += self.config.editor.camera_speed * delta_time;
+            }
+        }
+        if let Some(player) = &self.player {
+            self.camera.center += (player.pos - self.camera.center)
+                * (self.config.camera.speed * delta_time).min(1.0);
+        }
+        if self.player.is_some() {
+            self.unprocessed += delta_time;
+            while self.unprocessed > 0.0 {
+                let vel = self.player.as_ref().unwrap().vel.len();
+                let dt = self
+                    .unprocessed
+                    .min(self.config.tick_distance / vel.max(1.0));
+                self.tick(dt);
+                self.unprocessed -= dt;
             }
         }
     }

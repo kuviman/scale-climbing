@@ -1,3 +1,4 @@
+tick_distance = 0.01
 gravity = 5
 bounciness = 0.3
 friction = 0.9
