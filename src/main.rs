@@ -27,6 +27,7 @@ pub struct Game {
     config: Config,
     camera: Camera2d,
     quad: ugli::VertexBuffer<Vertex>,
+    time: f32,
 }
 
 impl Game {
@@ -40,6 +41,7 @@ impl Game {
             .await
             .unwrap();
         Self {
+            time: 0.0,
             geng: geng.clone(),
             camera: Camera2d {
                 center: vec2::ZERO,
@@ -62,15 +64,24 @@ impl Game {
 }
 
 impl geng::State for Game {
+    fn update(&mut self, delta_time: f64) {
+        let delta_time = delta_time as f32;
+        self.time += delta_time;
+    }
     fn draw(&mut self, framebuffer: &mut ugli::Framebuffer) {
-        let camera_uniforms = self.camera.uniforms(framebuffer.size().map(|x| x as f32));
+        let uniforms = (
+            ugli::uniforms! {
+                u_time: self.time,
+            },
+            self.camera.uniforms(framebuffer.size().map(|x| x as f32)),
+        );
         ugli::clear(framebuffer, None, Some(1.0), None);
         ugli::draw(
             framebuffer,
             &self.assets.shaders.background,
             ugli::DrawMode::TriangleFan,
             &self.quad,
-            &camera_uniforms,
+            &uniforms,
             ugli::DrawParameters::default(),
         );
     }
