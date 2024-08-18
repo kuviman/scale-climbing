@@ -11,10 +11,14 @@ time_to_full = 1
 max_distance = 0.05
 
 [player]
-radius = 0.2
+radius = 0.05
 min_radius = 0.05
 max_radius = 0.5
 scaling_speed = 5
 
 [cursor]
 hotspot = [16, 16]
+
+[editor]
+snap_distance = 0.2
+cursor_rotation_speed = 360
