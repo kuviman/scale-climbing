@@ -27,12 +27,16 @@ pub struct CursorConfig {
 #[derive(Deserialize)]
 pub struct PlayerConfig {
     radius: f32,
+    min_radius: f32,
+    max_radius: f32,
+    scaling_speed: f32,
 }
 
 #[derive(Deserialize)]
 pub struct Config {
     gravity: f32,
     bounciness: f32,
+    friction: f32,
     fov: f32,
     player: PlayerConfig,
     level_mesh: LevelMeshConfig,
@@ -52,6 +56,7 @@ struct Surface {
 struct To {
     normal: vec2<f32>,
     distance: f32,
+    closest_point: vec2<f32>,
 }
 
 impl Surface {
@@ -61,23 +66,26 @@ impl Surface {
             return To {
                 normal: (p - b).normalize_or_zero(),
                 distance: (p - b).len(),
+                closest_point: b,
             };
         }
         if vec2::dot(b - a, p - a) < 0.0 {
             return To {
                 normal: (p - a).normalize_or_zero(),
                 distance: (p - a).len(),
+                closest_point: a,
             };
         }
-        let normal = (b - a).rotate_90().normalize();
-        let distance = vec2::dot(normal, p - a);
-        if distance > 0.0 {
-            To { normal, distance }
-        } else {
-            To {
-                normal: -normal,
-                distance: -distance,
-            }
+        let mut normal = (b - a).rotate_90().normalize();
+        let mut distance = vec2::dot(normal, p - a);
+        if distance < 0.0 {
+            normal = -normal;
+            distance = -distance;
+        }
+        To {
+            normal,
+            distance,
+            closest_point: p - normal * distance,
         }
     }
 }
@@ -156,6 +164,7 @@ pub struct Game {
     temp_texture: ugli::Texture,
     temp_renderbuffer: ugli::Renderbuffer<ugli::DepthStencilValue>,
     player: Player,
+    editor_mode: bool,
 }
 
 impl Game {
@@ -211,6 +220,7 @@ impl Game {
             },
             assets,
             config,
+            editor_mode: false,
         }
     }
 
@@ -235,15 +245,48 @@ impl geng::State for Game {
         self.player.vel.y -= self.config.gravity * delta_time;
         self.player.pos += self.player.vel * delta_time;
 
+        let target_radius = if self
+            .geng
+            .window()
+            .is_button_pressed(geng::MouseButton::Left)
+        {
+            self.config.player.max_radius
+        } else if self
+            .geng
+            .window()
+            .is_button_pressed(geng::MouseButton::Right)
+        {
+            self.config.player.min_radius
+        } else {
+            self.config.player.radius
+        };
+        let player_scaling_speed =
+            (target_radius - self.player.radius) * self.config.player.scaling_speed;
+        let old_radius = self.player.radius;
+        let scale_origin = self.player.pos
+            + (self.screen_to_world(self.geng.window().cursor_position().unwrap_or(vec2::ZERO))
+                - self.player.pos)
+                .clamp_len(..=self.player.radius);
+        let new_radius = (self.player.radius + player_scaling_speed * delta_time)
+            .clamp(self.config.player.min_radius, self.config.player.max_radius);
+        self.player.pos = scale_origin + (self.player.pos - scale_origin) * new_radius / old_radius;
+        self.player.radius = new_radius;
+
         for surface in &self.level.surfaces {
             let to = surface.to(self.player.pos);
             if to.distance < self.player.radius {
                 let penetration = self.player.radius - to.distance;
                 self.player.pos += to.normal * penetration;
-                let delta_vel = vec2::dot(self.player.vel, to.normal);
-                if delta_vel < 0.0 {
-                    self.player.vel -= to.normal * delta_vel * (1.0 + self.config.bounciness);
+                let vel_at_collision_point = self.player.vel
+                    + player_scaling_speed * (to.closest_point - scale_origin) / old_radius;
+                let normal_vel = vec2::dot(vel_at_collision_point, to.normal);
+                if normal_vel < 0.0 {
+                    self.player.vel -= to.normal * normal_vel * (1.0 + self.config.bounciness);
                 }
+                let along = to.normal.rotate_90();
+                let along_vel = vec2::dot(vel_at_collision_point, along);
+                self.player.vel -=
+                    along * along_vel.clamp_abs(normal_vel.abs() * self.config.friction);
             }
         }
     }
@@ -340,34 +383,39 @@ impl geng::State for Game {
         );
     }
     fn handle_event(&mut self, event: geng::Event) {
-        match event {
-            geng::Event::MousePress {
-                button: geng::MouseButton::Left,
-            } => {
-                self.start_draw = self.geng.window().cursor_position();
-            }
-            geng::Event::MouseRelease { .. } => {
-                if let Some(start) = self.start_draw.take() {
-                    if let Some(end) = self.geng.window().cursor_position() {
-                        let ends = [start, end].map(|p| self.screen_to_world(p));
-                        self.level.surfaces.push(Surface { ends });
-                        self.update_level();
+        if matches!(event, geng::Event::KeyPress { key: geng::Key::F4 }) {
+            self.editor_mode = !self.editor_mode;
+        }
+        if self.editor_mode {
+            match event {
+                geng::Event::MousePress {
+                    button: geng::MouseButton::Left,
+                } => {
+                    self.start_draw = self.geng.window().cursor_position();
+                }
+                geng::Event::MouseRelease { .. } => {
+                    if let Some(start) = self.start_draw.take() {
+                        if let Some(end) = self.geng.window().cursor_position() {
+                            let ends = [start, end].map(|p| self.screen_to_world(p));
+                            self.level.surfaces.push(Surface { ends });
+                            self.update_level();
+                        }
                     }
                 }
-            }
-            geng::Event::KeyPress { key } => match key {
-                geng::Key::R => {
-                    if let Some(screen_pos) = self.geng.window().cursor_position() {
-                        self.player = Player {
-                            pos: self.screen_to_world(screen_pos),
-                            vel: vec2::ZERO,
-                            radius: self.config.player.radius,
-                        };
+                geng::Event::KeyPress { key } => match key {
+                    geng::Key::R => {
+                        if let Some(screen_pos) = self.geng.window().cursor_position() {
+                            self.player = Player {
+                                pos: self.screen_to_world(screen_pos),
+                                vel: vec2::ZERO,
+                                radius: self.config.player.radius,
+                            };
+                        }
                     }
-                }
+                    _ => {}
+                },
                 _ => {}
-            },
-            _ => {}
+            }
         }
     }
 }

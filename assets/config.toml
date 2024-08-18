@@ -1,12 +1,16 @@
 fov = 10
 gravity = 5
-bounciness = 0.5
+bounciness = 0.3
+friction = 0.5
 
 [level_mesh]
 max_distance = 0.05
 
 [player]
 radius = 0.2
+min_radius = 0.05
+max_radius = 0.5
+scaling_speed = 5
 
 [cursor]
 hotspot = [16, 16]
