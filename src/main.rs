@@ -1,5 +1,6 @@
 #![allow(clippy::assigning_clones)]
 use geng::prelude::*;
+use geng_egui::{egui, EguiGeng};
 
 #[derive(geng::asset::Load)]
 struct Shaders {
@@ -171,12 +172,14 @@ pub struct Game {
     start_draw: Option<vec2<f64>>,
     temp_texture: ugli::Texture,
     temp_renderbuffer: ugli::Renderbuffer<ugli::DepthStencilValue>,
-    player: Player,
+    player: Option<Player>,
+    egui: EguiGeng,
     editor_mode: bool,
+    cli: CliArgs,
 }
 
 impl Game {
-    pub async fn new(geng: &Geng) -> Self {
+    async fn new(geng: &Geng, cli: CliArgs) -> Self {
         let assets: Assets = geng
             .asset_manager()
             .load(run_dir().join("assets"))
@@ -221,15 +224,17 @@ impl Game {
             start_draw: None,
             temp_texture: ugli::Texture2d::new_with(geng.ugli(), vec2::splat(1), |_| Rgba::WHITE),
             temp_renderbuffer: ugli::Renderbuffer::new(geng.ugli(), vec2::splat(1)),
-            player: Player {
+            player: Some(Player {
                 pos: vec2::ZERO,
                 vel: vec2::ZERO,
                 radius: config.player.radius,
                 r#static: 0.0,
-            },
+            }),
             assets,
             config,
             editor_mode: false,
+            egui: EguiGeng::new(geng),
+            cli,
         }
     }
 
@@ -241,6 +246,15 @@ impl Game {
         self.camera
             .screen_to_world(self.framebuffer_size, screen.map(|x| x as f32))
     }
+
+    fn ui(&mut self) {
+        if !self.cli.enable_editor {
+            return;
+        }
+        egui::Window::new("Editor").show(self.egui.get_context(), |ui| {
+            ui.checkbox(&mut self.editor_mode, "Editor mode");
+        });
+    }
 }
 
 impl geng::State for Game {
@@ -251,59 +265,60 @@ impl geng::State for Game {
 
     fn fixed_update(&mut self, delta_time: f64) {
         let delta_time = delta_time as f32;
-        self.player.r#static =
-            (self.player.r#static + delta_time / self.config.r#static.time_to_full).min(1.0);
-        if self.player.vel.len() > self.config.r#static.max_vel {
-            self.player.r#static = 0.0;
-        }
-        self.player.vel.y -= self.config.gravity * delta_time * (1.0 - self.player.r#static);
-        self.player.pos += self.player.vel * delta_time * (1.0 - self.player.r#static);
+        let cursor_pos =
+            self.screen_to_world(self.geng.window().cursor_position().unwrap_or(vec2::ZERO));
+        if let Some(player) = &mut self.player {
+            player.r#static =
+                (player.r#static + delta_time / self.config.r#static.time_to_full).min(1.0);
+            if player.vel.len() > self.config.r#static.max_vel {
+                player.r#static = 0.0;
+            }
+            player.vel.y -= self.config.gravity * delta_time * (1.0 - player.r#static);
+            player.pos += player.vel * delta_time * (1.0 - player.r#static);
 
-        let target_radius = if self
-            .geng
-            .window()
-            .is_button_pressed(geng::MouseButton::Left)
-        {
-            self.config.player.max_radius
-        } else if self
-            .geng
-            .window()
-            .is_button_pressed(geng::MouseButton::Right)
-        {
-            self.config.player.min_radius
-        } else {
-            self.config.player.radius
-        };
-        let player_scaling_speed =
-            (target_radius - self.player.radius) * self.config.player.scaling_speed;
-        if player_scaling_speed.abs() > self.config.r#static.max_vel {
-            self.player.r#static = 0.0;
-        }
-        let old_radius = self.player.radius;
-        let scale_origin = self.player.pos
-            + (self.screen_to_world(self.geng.window().cursor_position().unwrap_or(vec2::ZERO))
-                - self.player.pos)
-                .clamp_len(..=self.player.radius);
-        let new_radius = (self.player.radius + player_scaling_speed * delta_time)
-            .clamp(self.config.player.min_radius, self.config.player.max_radius);
-        self.player.pos = scale_origin + (self.player.pos - scale_origin) * new_radius / old_radius;
-        self.player.radius = new_radius;
+            let target_radius = if self
+                .geng
+                .window()
+                .is_button_pressed(geng::MouseButton::Left)
+            {
+                self.config.player.max_radius
+            } else if self
+                .geng
+                .window()
+                .is_button_pressed(geng::MouseButton::Right)
+            {
+                self.config.player.min_radius
+            } else {
+                self.config.player.radius
+            };
+            let player_scaling_speed =
+                (target_radius - player.radius) * self.config.player.scaling_speed;
+            if player_scaling_speed.abs() > self.config.r#static.max_vel {
+                player.r#static = 0.0;
+            }
+            let old_radius = player.radius;
+            let scale_origin = player.pos + (cursor_pos - player.pos).clamp_len(..=player.radius);
+            let new_radius = (player.radius + player_scaling_speed * delta_time)
+                .clamp(self.config.player.min_radius, self.config.player.max_radius);
+            player.pos = scale_origin + (player.pos - scale_origin) * new_radius / old_radius;
+            player.radius = new_radius;
 
-        for surface in &self.level.surfaces {
-            let to = surface.to(self.player.pos);
-            if to.distance < self.player.radius {
-                let penetration = self.player.radius - to.distance;
-                self.player.pos += to.normal * penetration;
-                let vel_at_collision_point = self.player.vel
-                    + player_scaling_speed * (to.closest_point - scale_origin) / old_radius;
-                let normal_vel = vec2::dot(vel_at_collision_point, to.normal);
-                if normal_vel < 0.0 {
-                    self.player.vel -= to.normal * normal_vel * (1.0 + self.config.bounciness);
+            for surface in &self.level.surfaces {
+                let to = surface.to(player.pos);
+                if to.distance < player.radius {
+                    let penetration = player.radius - to.distance;
+                    player.pos += to.normal * penetration;
+                    let vel_at_collision_point = player.vel
+                        + player_scaling_speed * (to.closest_point - scale_origin) / old_radius;
+                    let normal_vel = vec2::dot(vel_at_collision_point, to.normal);
+                    if normal_vel < 0.0 {
+                        player.vel -= to.normal * normal_vel * (1.0 + self.config.bounciness);
+                    }
+                    let along = to.normal.rotate_90();
+                    let along_vel = vec2::dot(vel_at_collision_point, along);
+                    player.vel -=
+                        along * along_vel.clamp_abs(normal_vel.abs() * self.config.friction);
                 }
-                let along = to.normal.rotate_90();
-                let along_vel = vec2::dot(vel_at_collision_point, along);
-                self.player.vel -=
-                    along * along_vel.clamp_abs(normal_vel.abs() * self.config.friction);
             }
         }
     }
@@ -380,29 +395,53 @@ impl geng::State for Game {
             },
         );
 
-        ugli::draw(
-            framebuffer,
-            &self.assets.shaders.player,
-            ugli::DrawMode::TriangleFan,
-            &self.quad,
-            (
-                ugli::uniforms! {
-                    u_static: self.player.r#static,
-                    u_pos: self.player.pos,
-                    u_vel: self.player.vel,
-                    u_radius: self.player.radius,
+        if let Some(player) = &self.player {
+            ugli::draw(
+                framebuffer,
+                &self.assets.shaders.player,
+                ugli::DrawMode::TriangleFan,
+                &self.quad,
+                (
+                    ugli::uniforms! {
+                        u_static: player.r#static,
+                        u_pos: player.pos,
+                        u_vel: player.vel,
+                        u_radius: player.radius,
+                    },
+                    &uniforms,
+                ),
+                ugli::DrawParameters {
+                    blend_mode: Some(ugli::BlendMode::premultiplied_alpha()),
+                    ..default()
                 },
-                &uniforms,
-            ),
-            ugli::DrawParameters {
-                blend_mode: Some(ugli::BlendMode::premultiplied_alpha()),
-                ..default()
-            },
-        );
+            );
+        }
+
+        self.egui.begin_frame();
+        self.ui();
+        self.egui.end_frame();
+        self.egui.draw(framebuffer);
     }
     fn handle_event(&mut self, event: geng::Event) {
-        if matches!(event, geng::Event::KeyPress { key: geng::Key::F4 }) {
-            self.editor_mode = !self.editor_mode;
+        self.egui.handle_event(event.clone());
+        if self.cli.enable_editor {
+            match event {
+                geng::Event::KeyPress { key } => match key {
+                    geng::Key::F4 => self.editor_mode = !self.editor_mode,
+                    geng::Key::R => {
+                        if let Some(screen_pos) = self.geng.window().cursor_position() {
+                            self.player = Some(Player {
+                                pos: self.screen_to_world(screen_pos),
+                                vel: vec2::ZERO,
+                                radius: self.config.player.radius,
+                                r#static: 0.0,
+                            });
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
         }
         if self.editor_mode {
             match event {
@@ -420,19 +459,6 @@ impl geng::State for Game {
                         }
                     }
                 }
-                geng::Event::KeyPress { key } => match key {
-                    geng::Key::R => {
-                        if let Some(screen_pos) = self.geng.window().cursor_position() {
-                            self.player = Player {
-                                pos: self.screen_to_world(screen_pos),
-                                vel: vec2::ZERO,
-                                radius: self.config.player.radius,
-                                r#static: 0.0,
-                            };
-                        }
-                    }
-                    _ => {}
-                },
                 _ => {}
             }
         }
@@ -441,6 +467,8 @@ impl geng::State for Game {
 
 #[derive(clap::Parser)]
 struct CliArgs {
+    #[clap(long)]
+    enable_editor: bool,
     #[clap(flatten)]
     geng: geng::CliArgs,
 }
@@ -456,7 +484,7 @@ fn main() {
             options
         },
         move |geng| async move {
-            let state = Game::new(&geng).await;
+            let state = Game::new(&geng, cli).await;
             geng.run_state(state).await;
         },
     );

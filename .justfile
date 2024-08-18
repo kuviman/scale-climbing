@@ -2,7 +2,7 @@ default:
     echo "Look at the .justfile"
 
 run *args:
-    cargo run -- {{args}}
+    cargo run -- --enable-editor {{args}}
 
 web:
     cargo geng run --platform web

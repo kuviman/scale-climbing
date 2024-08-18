@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 serde = "1"
 geng.git = "https://github.com/geng-engine/geng"
+geng-egui.git = "https://github.com/geng-engine/geng-egui"
 
 [patch.crates-io]
 # This is merged but not published yet: https://github.com/smol-rs/async-broadcast/pull/47
