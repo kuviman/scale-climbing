@@ -85,14 +85,14 @@ struct To {
 impl Surface {
     fn to(&self, p: vec2<f32>) -> To {
         let [a, b] = self.ends;
-        if vec2::dot(a - b, p - b) < 0.0 {
+        if vec2::dot(a - b, p - b) <= 0.0 {
             return To {
                 normal: (p - b).normalize_or_zero(),
                 distance: (p - b).len(),
                 closest_point: b,
             };
         }
-        if vec2::dot(b - a, p - a) < 0.0 {
+        if vec2::dot(b - a, p - a) <= 0.0 {
             return To {
                 normal: (p - a).normalize_or_zero(),
                 distance: (p - a).len(),
