@@ -2,17 +2,31 @@
 use geng::prelude::*;
 
 #[derive(geng::asset::Load)]
-pub struct Assets {}
+struct Shaders {
+    background: ugli::Program,
+}
+
+#[derive(geng::asset::Load)]
+pub struct Assets {
+    shaders: Shaders,
+}
 
 #[derive(Deserialize)]
 pub struct Config {
-    background: Rgba<f32>,
+    fov: f32,
+}
+
+#[derive(ugli::Vertex)]
+struct Vertex {
+    a_pos: vec2<f32>,
 }
 
 pub struct Game {
     geng: Geng,
     assets: Assets,
     config: Config,
+    camera: Camera2d,
+    quad: ugli::VertexBuffer<Vertex>,
 }
 
 impl Game {
@@ -27,6 +41,20 @@ impl Game {
             .unwrap();
         Self {
             geng: geng.clone(),
+            camera: Camera2d {
+                center: vec2::ZERO,
+                rotation: Angle::ZERO,
+                fov: Camera2dFov::MinSide(config.fov),
+            },
+            quad: ugli::VertexBuffer::new_static(
+                geng.ugli(),
+                [(0, 0), (1, 0), (1, 1), (0, 1)]
+                    .into_iter()
+                    .map(|(x, y)| Vertex {
+                        a_pos: vec2(x, y).map(|x| x as f32),
+                    })
+                    .collect(),
+            ),
             assets,
             config,
         }
@@ -35,7 +63,16 @@ impl Game {
 
 impl geng::State for Game {
     fn draw(&mut self, framebuffer: &mut ugli::Framebuffer) {
-        ugli::clear(framebuffer, Some(self.config.background), Some(1.0), None);
+        let camera_uniforms = self.camera.uniforms(framebuffer.size().map(|x| x as f32));
+        ugli::clear(framebuffer, None, Some(1.0), None);
+        ugli::draw(
+            framebuffer,
+            &self.assets.shaders.background,
+            ugli::DrawMode::TriangleFan,
+            &self.quad,
+            &camera_uniforms,
+            ugli::DrawParameters::default(),
+        );
     }
 }
 
