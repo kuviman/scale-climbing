@@ -261,6 +261,9 @@ impl geng::State for Game {
     fn update(&mut self, delta_time: f64) {
         let delta_time = delta_time as f32;
         self.time += delta_time;
+        if self.editor_mode {
+            self.player = None;
+        }
     }
 
     fn fixed_update(&mut self, delta_time: f64) {
