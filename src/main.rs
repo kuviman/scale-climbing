@@ -369,6 +369,7 @@ impl geng::State for Game {
                 if to.distance < player.radius {
                     let penetration = player.radius - to.distance;
                     player.pos += to.normal * penetration;
+                    player.radius -= penetration;
                     let vel_at_collision_point = player.vel
                         + player_scaling_speed * (to.closest_point - scale_origin) / old_radius;
                     let normal_vel = vec2::dot(vel_at_collision_point, to.normal);
