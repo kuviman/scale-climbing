@@ -8,6 +8,7 @@ struct Shaders {
     surface_dist: ugli::Program,
     level: ugli::Program,
     player: ugli::Program,
+    selection: ugli::Program,
 }
 
 #[derive(geng::asset::Load)]
@@ -40,7 +41,14 @@ struct StaticConfig {
 }
 
 #[derive(Deserialize)]
+struct EditorConfig {
+    snap_distance: f32,
+    cursor_rotation_speed: f32,
+}
+
+#[derive(Deserialize)]
 pub struct Config {
+    editor: EditorConfig,
     gravity: f32,
     bounciness: f32,
     friction: f32,
@@ -169,7 +177,7 @@ pub struct Game {
     level: Level,
     level_mesh: LevelMesh,
     time: f32,
-    start_draw: Option<vec2<f64>>,
+    start_draw: Option<vec2<f32>>,
     temp_texture: ugli::Texture,
     temp_renderbuffer: ugli::Renderbuffer<ugli::DepthStencilValue>,
     player: Option<Player>,
@@ -242,9 +250,24 @@ impl Game {
         self.level_mesh = LevelMesh::new(&self.geng, &self.config, &self.level);
     }
 
-    fn screen_to_world(&self, screen: vec2<f64>) -> vec2<f32> {
+    fn snapped(&self, screen_pos: vec2<f64>) -> vec2<f32> {
+        let world_pos = self.screen_to_world(screen_pos);
+        if let Some(p) = self
+            .level
+            .surfaces
+            .iter()
+            .flat_map(|surface| surface.ends)
+            .filter(|&end| (end - world_pos).len() < self.config.editor.snap_distance)
+            .min_by_key(|&end| r32((end - world_pos).len()))
+        {
+            return p;
+        }
+        world_pos
+    }
+
+    fn screen_to_world(&self, screen_pos: vec2<f64>) -> vec2<f32> {
         self.camera
-            .screen_to_world(self.framebuffer_size, screen.map(|x| x as f32))
+            .screen_to_world(self.framebuffer_size, screen_pos.map(|x| x as f32))
     }
 
     fn ui(&mut self) {
@@ -420,6 +443,72 @@ impl geng::State for Game {
             );
         }
 
+        if self.editor_mode {
+            let cursor_pos =
+                self.snapped(self.geng.window().cursor_position().unwrap_or(vec2::ZERO));
+
+            if let Some(start) = self.start_draw {
+                let v = cursor_pos - start;
+                let matrix = mat3::translate((cursor_pos + start) / 2.0)
+                    * mat3::from_orts(
+                        v.normalize_or_zero()
+                            * (v.len() / 2.0 + self.config.editor.snap_distance / 2.0),
+                        v.normalize_or_zero().rotate_90() * self.config.editor.snap_distance / 2.0,
+                    );
+                ugli::draw(
+                    framebuffer,
+                    &self.assets.shaders.selection,
+                    ugli::DrawMode::TriangleFan,
+                    &self.quad,
+                    (
+                        ugli::uniforms! {
+                            u_model_matrix: matrix,
+                        },
+                        &uniforms,
+                    ),
+                    ugli::DrawParameters {
+                        blend_mode: None,
+                        ..default()
+                    },
+                );
+            }
+
+            if true {
+                let cursor_matrix = mat3::translate(cursor_pos)
+                    * mat3::rotate(Angle::from_degrees(
+                        self.config.editor.cursor_rotation_speed * self.time,
+                    ))
+                    * mat3::scale_uniform(self.config.editor.snap_distance / 2.0);
+                ugli::draw(
+                    framebuffer,
+                    &self.assets.shaders.selection,
+                    ugli::DrawMode::TriangleFan,
+                    &self.quad,
+                    (
+                        ugli::uniforms! {
+                            u_model_matrix: cursor_matrix,
+                        },
+                        &uniforms,
+                    ),
+                    ugli::DrawParameters {
+                        blend_mode: Some(ugli::BlendMode {
+                            rgb: ugli::ChannelBlendMode {
+                                src_factor: ugli::BlendFactor::OneMinusDstColor,
+                                dst_factor: ugli::BlendFactor::Zero,
+                                equation: ugli::BlendEquation::Add,
+                            },
+                            alpha: ugli::ChannelBlendMode {
+                                src_factor: ugli::BlendFactor::Zero,
+                                dst_factor: ugli::BlendFactor::One,
+                                equation: ugli::BlendEquation::Add,
+                            },
+                        }),
+                        ..default()
+                    },
+                );
+            }
+        }
+
         self.egui.begin_frame();
         self.ui();
         self.egui.end_frame();
@@ -451,13 +540,21 @@ impl geng::State for Game {
                 geng::Event::MousePress {
                     button: geng::MouseButton::Left,
                 } => {
-                    self.start_draw = self.geng.window().cursor_position();
+                    self.start_draw = self
+                        .geng
+                        .window()
+                        .cursor_position()
+                        .map(|pos| self.snapped(pos));
                 }
                 geng::Event::MouseRelease { .. } => {
                     if let Some(start) = self.start_draw.take() {
-                        if let Some(end) = self.geng.window().cursor_position() {
-                            let ends = [start, end].map(|p| self.screen_to_world(p));
-                            self.level.surfaces.push(Surface { ends });
+                        if let Some(end) = self
+                            .geng
+                            .window()
+                            .cursor_position()
+                            .map(|pos| self.snapped(pos))
+                        {
+                            self.level.surfaces.push(Surface { ends: [start, end] });
                             self.update_level();
                         }
                     }
