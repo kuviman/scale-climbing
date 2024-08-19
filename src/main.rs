@@ -866,6 +866,23 @@ impl geng::State for Game {
             Rgba::BLACK,
         );
 
+        if self.finished {
+            self.assets.font.draw_with_outline(
+                framebuffer,
+                &Camera2d {
+                    center: vec2::ZERO,
+                    rotation: Angle::ZERO,
+                    fov: Camera2dFov::Vertical(10.0),
+                },
+                "You WIN!",
+                vec2(geng::TextAlign::CENTER, geng::TextAlign::TOP),
+                mat3::scale_uniform(1.5),
+                Rgba::WHITE,
+                0.05,
+                Rgba::BLACK,
+            );
+        }
+
         self.egui.borrow_mut().begin_frame();
         self.ui();
         self.egui.borrow_mut().end_frame();
