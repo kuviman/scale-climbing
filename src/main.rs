@@ -16,6 +16,8 @@ struct Shaders {
 
 #[derive(geng::asset::Load)]
 pub struct Assets {
+    #[load(path = "font/Moby-Monospace.ttf")]
+    font: geng::Font,
     shaders: Shaders,
 }
 
@@ -264,6 +266,7 @@ pub struct Game {
     levels: Levels,
     current_level: usize,
     draw_insides: bool,
+    finished: bool,
 }
 
 impl Game {
@@ -331,6 +334,7 @@ impl Game {
             unprocessed: 0.0,
             current_level: 0,
             draw_insides: true,
+            finished: false,
         };
         result.setup_level();
         result
@@ -346,6 +350,7 @@ impl Game {
 
     fn next_level(&mut self) {
         if self.current_level + 1 >= self.levels.list.len() {
+            self.finished = true;
             return;
         }
         self.current_level += 1;
@@ -353,6 +358,7 @@ impl Game {
     }
 
     fn setup_level(&mut self) {
+        self.finished = false;
         self.level = self.levels.map[&self.levels.list[self.current_level]].clone();
         self.update_level();
         self.player = Some(Player {
@@ -515,6 +521,9 @@ impl Game {
 impl geng::State for Game {
     fn update(&mut self, delta_time: f64) {
         let delta_time = delta_time as f32;
+        if self.finished {
+            return;
+        }
         self.time += delta_time;
         if self.editor_mode {
             self.player = None;
@@ -837,6 +846,26 @@ impl geng::State for Game {
             }
         }
 
+        self.assets.font.draw_with_outline(
+            framebuffer,
+            &Camera2d {
+                center: vec2::ZERO,
+                rotation: Angle::ZERO,
+                fov: Camera2dFov::Vertical(10.0),
+            },
+            &{
+                let ms = (self.time * 1000.0) as i64;
+                let seconds = ms / 1000;
+                let minutes = seconds / 60;
+                format!("{}:{:02}:{:03}", minutes, seconds % 60, ms % 1000)
+            },
+            vec2(geng::TextAlign::CENTER, geng::TextAlign::TOP),
+            mat3::translate(vec2(0.0, 5.0)),
+            Rgba::WHITE,
+            0.05,
+            Rgba::BLACK,
+        );
+
         self.egui.borrow_mut().begin_frame();
         self.ui();
         self.egui.borrow_mut().end_frame();
@@ -845,6 +874,15 @@ impl geng::State for Game {
     fn handle_event(&mut self, event: geng::Event) {
         self.egui.borrow_mut().handle_event(event.clone());
         if self.egui.borrow().get_context().is_pointer_over_area() {
+            return;
+        }
+        if matches!(event, geng::Event::KeyPress { key: geng::Key::R })
+            && self.geng.window().is_key_pressed(geng::Key::ControlLeft)
+        {
+            self.time = 0.0;
+            self.current_level = 0;
+            self.setup_level();
+            self.editor_mode = false;
             return;
         }
         if self.cli.enable_editor {
