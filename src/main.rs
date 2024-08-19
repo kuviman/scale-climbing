@@ -7,6 +7,7 @@ struct Shaders {
     background: ugli::Program,
     surface_dist: ugli::Program,
     level: ugli::Program,
+    finish: ugli::Program,
     player: ugli::Program,
     selection: ugli::Program,
 }
@@ -55,6 +56,7 @@ struct CameraConfig {
 
 #[derive(Deserialize)]
 pub struct Config {
+    finish_radius: f32,
     tick_distance: f32,
     editor: EditorConfig,
     gravity: f32,
@@ -116,13 +118,19 @@ impl Surface {
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Level {
-    #[serde(default = "zero_vec")]
+    #[serde(default = "default_start")]
     start_pos: vec2<f32>,
+    #[serde(default = "default_finish")]
+    finish_pos: vec2<f32>,
     #[serde(default)]
     surfaces: Vec<Surface>,
 }
 
-fn zero_vec() -> vec2<f32> {
+fn default_finish() -> vec2<f32> {
+    vec2(5.0, 0.0)
+}
+
+fn default_start() -> vec2<f32> {
     vec2::ZERO
 }
 
@@ -332,7 +340,11 @@ impl Game {
         })
     }
 
-    fn save_level(&self) {
+    fn save_level(&mut self) {
+        self.levels.map.insert(
+            self.levels.list[self.current_level].clone(),
+            self.level.clone(),
+        );
         serde_json::to_writer_pretty(
             std::io::BufWriter::new(
                 std::fs::File::create(
@@ -388,6 +400,8 @@ impl Game {
             ui.label("respawn at cursor - R");
             ui.label("new segment - Drag LMB");
             ui.label("remove segment - RMB");
+            ui.label("set start - Z");
+            ui.label("set finish - X");
             ui.label("level saves automatically");
         });
     }
@@ -461,6 +475,12 @@ impl Game {
                         along * along_vel.clamp_abs(normal_vel.abs() * self.config.friction);
                 }
             }
+
+            if (player.pos - self.level.finish_pos).len()
+                < player.radius + self.config.finish_radius
+            {
+                self.next_level();
+            }
         }
     }
 }
@@ -483,7 +503,10 @@ impl geng::State for Game {
             if self.geng.window().is_key_pressed(geng::Key::D) {
                 self.camera.center.x += self.config.editor.camera_speed * delta_time;
             }
+        } else if self.player.is_none() {
+            self.setup_level();
         }
+
         if let Some(player) = &self.player {
             self.camera.center += (player.pos - self.camera.center)
                 * (self.config.camera.speed * delta_time).min(1.0);
@@ -595,7 +618,45 @@ impl geng::State for Game {
             );
         }
 
+        ugli::draw(
+            framebuffer,
+            &self.assets.shaders.finish,
+            ugli::DrawMode::TriangleFan,
+            &self.quad,
+            (
+                ugli::uniforms! {
+                    u_pos: self.level.finish_pos,
+                    u_radius: self.config.finish_radius,
+                },
+                &uniforms,
+            ),
+            ugli::DrawParameters {
+                blend_mode: Some(ugli::BlendMode::premultiplied_alpha()),
+                ..default()
+            },
+        );
+
         if self.editor_mode {
+            ugli::draw(
+                framebuffer,
+                &self.assets.shaders.player,
+                ugli::DrawMode::TriangleFan,
+                &self.quad,
+                (
+                    ugli::uniforms! {
+                        u_static: 0.0,
+                        u_pos: self.level.start_pos,
+                        u_vel: vec2::<f32>::ZERO,
+                        u_radius: self.config.player.radius,
+                    },
+                    &uniforms,
+                ),
+                ugli::DrawParameters {
+                    blend_mode: Some(ugli::BlendMode::premultiplied_alpha()),
+                    ..default()
+                },
+            );
+
             let cursor =
                 self.screen_to_world(self.geng.window().cursor_position().unwrap_or(vec2::ZERO));
             let snapped_cursor =
@@ -767,6 +828,21 @@ impl geng::State for Game {
                         }
                     }
                 }
+                geng::Event::KeyPress { key } => match key {
+                    geng::Key::Z => {
+                        self.level.start_pos = self.screen_to_world(
+                            self.geng.window().cursor_position().unwrap_or(vec2::ZERO),
+                        );
+                        self.save_level();
+                    }
+                    geng::Key::X => {
+                        self.level.finish_pos = self.screen_to_world(
+                            self.geng.window().cursor_position().unwrap_or(vec2::ZERO),
+                        );
+                        self.save_level();
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
