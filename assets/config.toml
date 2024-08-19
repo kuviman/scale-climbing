@@ -18,7 +18,7 @@ max_distance = 0.05
 radius = 0.05
 min_radius = 0.05
 max_radius = 0.5
-scaling_speed = 5
+scaling_speed = 4
 
 [cursor]
 hotspot = [16, 16]
