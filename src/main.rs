@@ -769,6 +769,9 @@ impl geng::State for Game {
     }
     fn handle_event(&mut self, event: geng::Event) {
         self.egui.borrow_mut().handle_event(event.clone());
+        if self.egui.borrow().get_context().is_pointer_over_area() {
+            return;
+        }
         if self.cli.enable_editor {
             match event {
                 geng::Event::KeyPress { key } => match key {
