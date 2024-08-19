@@ -72,7 +72,7 @@ struct QuadVertex {
     a_pos: vec2<f32>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Surface {
     ends: [vec2<f32>; 2],
 }
@@ -114,9 +114,49 @@ impl Surface {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Level {
+    #[serde(default = "zero_vec")]
+    start_pos: vec2<f32>,
+    #[serde(default)]
     surfaces: Vec<Surface>,
+}
+
+fn zero_vec() -> vec2<f32> {
+    vec2::ZERO
+}
+
+struct Levels {
+    list: Vec<String>,
+    map: HashMap<String, Level>,
+}
+
+impl geng::asset::Load for Levels {
+    type Options = ();
+    fn load(
+        _manager: &geng::asset::Manager,
+        path: &std::path::Path,
+        _options: &Self::Options,
+    ) -> geng::asset::Future<Self> {
+        let path = path.to_owned();
+        async move {
+            let path = &path;
+            let list: Vec<String> = file::load_json(path.join("_list.json")).await.unwrap();
+            let levels = future::join_all(list.into_iter().map(|level_name| async move {
+                let level: Level = file::load_json(path.join(&level_name).with_extension("json"))
+                    .await
+                    .unwrap();
+                (level_name, level)
+            }))
+            .await;
+            Ok(Self {
+                list: levels.iter().map(|(name, _level)| name.clone()).collect(),
+                map: levels.into_iter().collect(),
+            })
+        }
+        .boxed_local()
+    }
+    const DEFAULT_EXT: Option<&'static str> = None;
 }
 
 struct LevelMesh {
@@ -193,6 +233,8 @@ pub struct Game {
     editor_mode: bool,
     cli: CliArgs,
     unprocessed: f32,
+    levels: Levels,
+    current_level: usize,
 }
 
 impl Game {
@@ -214,11 +256,15 @@ impl Game {
                 .unwrap(),
             hotspot: config.cursor.hotspot,
         });
-        let level = file::load_json(run_dir().join("assets").join("level.json"))
+        let levels: Levels = geng
+            .asset_manager()
+            .load(run_dir().join("assets").join("levels"))
             .await
             .unwrap();
+        let level = levels.map[&levels.list[0]].clone();
         let level_mesh = LevelMesh::new(geng, &config, &level);
-        Self {
+        let mut result = Self {
+            levels,
             framebuffer_size: vec2::splat(1.0),
             level,
             level_mesh,
@@ -253,7 +299,37 @@ impl Game {
             egui: EguiGeng::new(geng),
             cli,
             unprocessed: 0.0,
+            current_level: 0,
+        };
+        result.setup_level();
+        result
+    }
+
+    fn prev_level(&mut self) {
+        if self.current_level == 0 {
+            return;
         }
+        self.current_level -= 1;
+        self.setup_level();
+    }
+
+    fn next_level(&mut self) {
+        if self.current_level + 1 >= self.levels.list.len() {
+            return;
+        }
+        self.current_level += 1;
+        self.setup_level();
+    }
+
+    fn setup_level(&mut self) {
+        self.level = self.levels.map[&self.levels.list[self.current_level]].clone();
+        self.update_level();
+        self.player = Some(Player {
+            pos: self.level.start_pos,
+            vel: vec2::ZERO,
+            radius: self.config.player.radius,
+            r#static: 0.0,
+        })
     }
 
     fn update_level(&mut self) {
@@ -619,6 +695,8 @@ impl geng::State for Game {
                             });
                         }
                     }
+                    geng::Key::BracketLeft => self.prev_level(),
+                    geng::Key::BracketRight => self.next_level(),
                     _ => {}
                 },
                 _ => {}
