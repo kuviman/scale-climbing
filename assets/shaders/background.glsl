@@ -32,6 +32,6 @@ vec4 hsla(float h, float s, float l, float a) {
 uniform float u_time;
 void main() {
     float x = snoise(vec3(v_world_pos / 3.0, u_time / 5.0)) * 0.1 + 0.6;
-    gl_FragColor = hsla(x, 0.5, 0.1, 1.0);
+    gl_FragColor = hsla(x, 0.5, 0.7, 1.0);
 }
 #endif

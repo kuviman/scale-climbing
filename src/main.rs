@@ -4,6 +4,8 @@ use geng_egui::{egui, EguiGeng};
 
 #[derive(geng::asset::Load)]
 struct Shaders {
+    invert: ugli::Program,
+    insides: ugli::Program,
     background: ugli::Program,
     surface_dist: ugli::Program,
     level: ugli::Program,
@@ -70,7 +72,7 @@ pub struct Config {
 }
 
 #[derive(ugli::Vertex)]
-struct QuadVertex {
+struct Vertex {
     a_pos: vec2<f32>,
 }
 
@@ -169,6 +171,7 @@ impl geng::asset::Load for Levels {
 
 struct LevelMesh {
     surfaces_dist: ugli::VertexBuffer<SurfaceVertex>,
+    insides: ugli::VertexBuffer<Vertex>,
 }
 
 #[derive(ugli::Vertex, Copy, Clone)]
@@ -181,6 +184,22 @@ impl LevelMesh {
     fn new(geng: &Geng, config: &Config, level: &Level) -> Self {
         let config = &config.level_mesh;
         Self {
+            insides: ugli::VertexBuffer::new_static(
+                geng.ugli(),
+                level
+                    .surfaces
+                    .iter()
+                    .flat_map(|surface| {
+                        let [a, b] = surface.ends;
+                        if vec2::skew(a, b) < 0.0 {
+                            [a, b, vec2::ZERO]
+                        } else {
+                            [b, a, vec2::ZERO]
+                        }
+                    })
+                    .map(|p| Vertex { a_pos: p })
+                    .collect(),
+            ),
             surfaces_dist: ugli::VertexBuffer::new_static(
                 geng.ugli(),
                 level
@@ -229,7 +248,7 @@ pub struct Game {
     assets: Assets,
     config: Config,
     camera: Camera2d,
-    quad: ugli::VertexBuffer<QuadVertex>,
+    quad: ugli::VertexBuffer<Vertex>,
     level: Level,
     level_mesh: LevelMesh,
     time: f32,
@@ -243,6 +262,7 @@ pub struct Game {
     unprocessed: f32,
     levels: Levels,
     current_level: usize,
+    draw_insides: bool,
 }
 
 impl Game {
@@ -287,7 +307,7 @@ impl Game {
                 geng.ugli(),
                 [(0, 0), (1, 0), (1, 1), (0, 1)]
                     .into_iter()
-                    .map(|(x, y)| QuadVertex {
+                    .map(|(x, y)| Vertex {
                         a_pos: vec2(x, y).map(|x| x as f32),
                     })
                     .collect(),
@@ -308,6 +328,7 @@ impl Game {
             cli,
             unprocessed: 0.0,
             current_level: 0,
+            draw_insides: true,
         };
         result.setup_level();
         result
@@ -391,6 +412,7 @@ impl Game {
             return;
         }
         egui::Window::new("Editor").show(self.egui.clone().borrow().get_context(), |ui| {
+            ui.checkbox(&mut self.draw_insides, "draw insides");
             ui.checkbox(&mut self.editor_mode, "Editor mode - F4");
             if ui.button("prev level - [").clicked() {
                 self.prev_level();
@@ -556,7 +578,7 @@ impl geng::State for Game {
                 ugli::DepthAttachment::RenderbufferWithStencil(&mut self.temp_renderbuffer),
             );
             let framebuffer = &mut framebuffer;
-            ugli::clear(framebuffer, Some(Rgba::WHITE), None, None);
+            ugli::clear(framebuffer, Some(Rgba::WHITE), None, Some(0));
             ugli::draw(
                 framebuffer,
                 &self.assets.shaders.surface_dist,
@@ -577,6 +599,53 @@ impl geng::State for Game {
                     ..default()
                 },
             );
+            if self.draw_insides {
+                ugli::draw(
+                    framebuffer,
+                    &self.assets.shaders.insides,
+                    ugli::DrawMode::Triangles,
+                    &self.level_mesh.insides,
+                    &uniforms,
+                    ugli::DrawParameters {
+                        write_color: false,
+                        write_depth: false,
+                        stencil_mode: Some({
+                            ugli::StencilMode::always(ugli::FaceStencilMode {
+                                test: ugli::StencilTest {
+                                    condition: ugli::Condition::Always,
+                                    reference: 0,
+                                    mask: 0,
+                                },
+                                op: ugli::StencilOp::always(ugli::StencilOpFunc::Invert),
+                            })
+                        }),
+                        ..default()
+                    },
+                );
+                ugli::draw(
+                    framebuffer,
+                    &self.assets.shaders.invert,
+                    ugli::DrawMode::TriangleFan,
+                    &self.quad,
+                    (),
+                    ugli::DrawParameters {
+                        blend_mode: Some(ugli::BlendMode::combined(ugli::ChannelBlendMode {
+                            src_factor: ugli::BlendFactor::OneMinusDstColor,
+                            dst_factor: ugli::BlendFactor::Zero,
+                            equation: ugli::BlendEquation::Add,
+                        })),
+                        stencil_mode: Some(ugli::StencilMode::always(ugli::FaceStencilMode {
+                            test: ugli::StencilTest {
+                                condition: ugli::Condition::Equal,
+                                reference: 0,
+                                mask: 0xff,
+                            },
+                            op: ugli::StencilOp::always(ugli::StencilOpFunc::Keep),
+                        })),
+                        ..default()
+                    },
+                );
+            }
         }
 
         ugli::draw(

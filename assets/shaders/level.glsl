@@ -14,6 +14,7 @@ void main() {
 #endif
 
 #ifdef FRAGMENT_SHADER
+#include <noise>
 uniform sampler2D u_surface_dist;
 
 vec4 premultiply(vec3 rgb, float a) {
@@ -21,7 +22,15 @@ vec4 premultiply(vec3 rgb, float a) {
 }
 
 void main() {
-    float a = 1.0 - texture2D(u_surface_dist, v_uv).x;
-    gl_FragColor = premultiply(vec3(0.5, 0.5, 1.0), a);
+    float d = texture2D(u_surface_dist, v_uv).x * 2.0 - 1.0;
+    if (d < -0.5) {
+        float t = round(snoise(v_world_pos) * 0.5 + snoise(v_world_pos / 2.0 + vec2(123.0, 56.0)));
+        t = 0.05 * t + 0.2;
+        gl_FragColor = vec4(t, t, t, 1.0);
+    } else if (d > 0.5) {
+        discard;
+    } else {
+        gl_FragColor = vec4(vec3(0.1), 1.0);
+    }
 }
 #endif
