@@ -361,13 +361,16 @@ impl Game {
             return;
         }
         egui::Window::new("Editor").show(self.egui.clone().borrow().get_context(), |ui| {
-            ui.checkbox(&mut self.editor_mode, "Editor mode");
-            if ui.button("prev level").clicked() {
+            ui.checkbox(&mut self.editor_mode, "Editor mode - F4");
+            if ui.button("prev level - [").clicked() {
                 self.prev_level();
             }
-            if ui.button("next level").clicked() {
+            if ui.button("next level - ]").clicked() {
                 self.next_level();
             }
+            ui.label("respawn at cursor - R");
+            ui.label("new segment - Drag LMB");
+            ui.label("remove segment - RMB");
         });
     }
 
@@ -693,6 +696,7 @@ impl geng::State for Game {
                     geng::Key::F4 => self.editor_mode = !self.editor_mode,
                     geng::Key::R => {
                         if let Some(screen_pos) = self.geng.window().cursor_position() {
+                            self.editor_mode = false;
                             self.player = Some(Player {
                                 pos: self.screen_to_world(screen_pos),
                                 vel: vec2::ZERO,
