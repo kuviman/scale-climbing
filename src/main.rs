@@ -229,7 +229,7 @@ pub struct Game {
     temp_texture: ugli::Texture,
     temp_renderbuffer: ugli::Renderbuffer<ugli::DepthStencilValue>,
     player: Option<Player>,
-    egui: EguiGeng,
+    egui: Rc<RefCell<EguiGeng>>,
     editor_mode: bool,
     cli: CliArgs,
     unprocessed: f32,
@@ -296,7 +296,7 @@ impl Game {
             assets,
             config,
             editor_mode: false,
-            egui: EguiGeng::new(geng),
+            egui: Rc::new(RefCell::new(EguiGeng::new(geng))),
             cli,
             unprocessed: 0.0,
             current_level: 0,
@@ -360,8 +360,14 @@ impl Game {
         if !self.cli.enable_editor {
             return;
         }
-        egui::Window::new("Editor").show(self.egui.get_context(), |ui| {
+        egui::Window::new("Editor").show(self.egui.clone().borrow().get_context(), |ui| {
             ui.checkbox(&mut self.editor_mode, "Editor mode");
+            if ui.button("prev level").clicked() {
+                self.prev_level();
+            }
+            if ui.button("next level").clicked() {
+                self.next_level();
+            }
         });
     }
 
@@ -674,13 +680,13 @@ impl geng::State for Game {
             }
         }
 
-        self.egui.begin_frame();
+        self.egui.borrow_mut().begin_frame();
         self.ui();
-        self.egui.end_frame();
-        self.egui.draw(framebuffer);
+        self.egui.borrow_mut().end_frame();
+        self.egui.borrow_mut().draw(framebuffer);
     }
     fn handle_event(&mut self, event: geng::Event) {
-        self.egui.handle_event(event.clone());
+        self.egui.borrow_mut().handle_event(event.clone());
         if self.cli.enable_editor {
             match event {
                 geng::Event::KeyPress { key } => match key {
