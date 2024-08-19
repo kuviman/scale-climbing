@@ -240,6 +240,7 @@ struct Player {
     vel: vec2<f32>,
     radius: f32,
     r#static: f32,
+    scale_origin: vec2<f32>,
 }
 
 pub struct Game {
@@ -320,6 +321,7 @@ impl Game {
                 vel: vec2::ZERO,
                 radius: config.player.radius,
                 r#static: 0.0,
+                scale_origin: vec2::ZERO,
             }),
             assets,
             config,
@@ -358,6 +360,7 @@ impl Game {
             vel: vec2::ZERO,
             radius: self.config.player.radius,
             r#static: 0.0,
+            scale_origin: vec2::ZERO,
         });
         self.camera.center = self.level.start_pos;
     }
@@ -475,6 +478,7 @@ impl Game {
             }
             let old_radius = player.radius;
             let scale_origin = player.pos + (cursor_pos - player.pos).clamp_len(..=player.radius);
+            player.scale_origin = scale_origin;
             let new_radius = (player.radius + player_scaling_speed * delta_time)
                 .clamp(self.config.player.min_radius, self.config.player.max_radius);
             player.pos = scale_origin + (player.pos - scale_origin) * new_radius / old_radius;
@@ -677,6 +681,7 @@ impl geng::State for Game {
                         u_static: player.r#static,
                         u_pos: player.pos,
                         u_vel: player.vel,
+                        u_scale_origin: player.scale_origin,
                         u_radius: player.radius,
                     },
                     &uniforms,
@@ -854,6 +859,7 @@ impl geng::State for Game {
                                 vel: vec2::ZERO,
                                 radius: self.config.player.radius,
                                 r#static: 0.0,
+                                scale_origin: vec2::ZERO,
                             });
                         }
                     }

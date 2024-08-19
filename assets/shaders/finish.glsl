@@ -14,11 +14,35 @@ void main() {
 #endif
 
 #ifdef FRAGMENT_SHADER
+#include <noise>
+
 uniform float u_time;
+
+float hsla_helper(float h, float s, float l, float n) {
+    float alpha = s * min(l, 1.0 - l);
+    float k = n + h * 12.0;
+    k = k - floor(k / 12.0) * 12.0;
+    return l - alpha * max(-1.0, min(min(k - 3.0, 9.0 - k), 1.0));
+}
+
+vec4 hsla(float h, float s, float l, float a) {
+    return vec4(
+        hsla_helper(h, s, l, 0.0),
+        hsla_helper(h, s, l, 8.0),
+        hsla_helper(h, s, l, 4.0),
+        a);
+}
+
+vec4 premultiply(vec3 rgb, float a) {
+    return vec4(rgb * a, a);
+}
+
 void main() {
     if (length(v_uv) > 1.0) {
         discard;
     }
-    gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+    float a = float(fract(atan(v_uv.y, v_uv.x) / 3.14 * 5.0 + u_time) > length(v_uv));
+    a = max(a, 0.7 - length(v_uv));
+    gl_FragColor = premultiply(hsla(snoise(vec3(v_uv, u_time)) * 0.2 + u_time * 0.2, 1.0, 0.4, 1.0).rgb, a);
 }
 #endif
