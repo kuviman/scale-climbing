@@ -332,6 +332,23 @@ impl Game {
         })
     }
 
+    fn save_level(&self) {
+        serde_json::to_writer_pretty(
+            std::io::BufWriter::new(
+                std::fs::File::create(
+                    run_dir()
+                        .join("assets")
+                        .join("levels")
+                        .join(&self.levels.list[self.current_level])
+                        .with_extension("json"),
+                )
+                .unwrap(),
+            ),
+            &self.level,
+        )
+        .unwrap();
+    }
+
     fn update_level(&mut self) {
         self.level_mesh = LevelMesh::new(&self.geng, &self.config, &self.level);
     }
@@ -371,6 +388,7 @@ impl Game {
             ui.label("respawn at cursor - R");
             ui.label("new segment - Drag LMB");
             ui.label("remove segment - RMB");
+            ui.label("level saves automatically");
         });
     }
 
@@ -731,6 +749,7 @@ impl geng::State for Game {
                     );
                     if let Some(index) = self.hovered_surface(cursor) {
                         self.level.surfaces.remove(index);
+                        self.save_level();
                         self.update_level();
                     }
                 }
@@ -743,6 +762,7 @@ impl geng::State for Game {
                             .map(|pos| self.snapped(pos))
                         {
                             self.level.surfaces.push(Surface { ends: [start, end] });
+                            self.save_level();
                             self.update_level();
                         }
                     }
