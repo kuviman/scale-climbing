@@ -1,3 +1,11 @@
 {
-    "surfaces": []
+  "start_pos": [
+    0.0,
+    0.0
+  ],
+  "finish_pos": [
+    5.0,
+    0.0
+  ],
+  "surfaces": []
 }
