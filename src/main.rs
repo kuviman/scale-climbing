@@ -337,7 +337,8 @@ impl Game {
             vel: vec2::ZERO,
             radius: self.config.player.radius,
             r#static: 0.0,
-        })
+        });
+        self.camera.center = self.level.start_pos;
     }
 
     fn save_level(&mut self) {
