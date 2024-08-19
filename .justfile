@@ -9,4 +9,4 @@ web:
 
 deploy:
     cargo geng build --platform web --release
-    butler push target/geng kuviman/scaling-over-it:html5
+    butler push target/geng kuviman/scale-climbing:html5
