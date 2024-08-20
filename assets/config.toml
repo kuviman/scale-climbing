@@ -4,6 +4,15 @@ bounciness = 0.3
 friction = 5
 finish_radius = 0.2
 
+[sfx]
+master_volume = 3
+music_volume = 0.3
+scaling_max_volume = 1
+hit_max_volume_speed = 3
+hit_volume = 0.5
+level_volume = 0.15
+win_volume = 0.15
+
 [camera]
 fov = 10
 speed = 2

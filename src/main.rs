@@ -15,7 +15,21 @@ struct Shaders {
 }
 
 #[derive(geng::asset::Load)]
+struct SfxAssets {
+    hit: geng::Sound,
+    #[load(options(looped = "true"))]
+    scale_up: geng::Sound,
+    #[load(options(looped = "true"))]
+    scale_down: geng::Sound,
+    level: geng::Sound,
+    win: geng::Sound,
+}
+
+#[derive(geng::asset::Load)]
 pub struct Assets {
+    #[load(path = "music.mp3", options(looped = "true"))]
+    music: geng::Sound,
+    sfx: SfxAssets,
     #[load(path = "font/Moby-Monospace.ttf")]
     font: geng::Font,
     shaders: Shaders,
@@ -59,7 +73,19 @@ struct CameraConfig {
 }
 
 #[derive(Deserialize)]
+pub struct SfxConfig {
+    level_volume: f32,
+    win_volume: f32,
+    master_volume: f32,
+    music_volume: f32,
+    scaling_max_volume: f32,
+    hit_volume: f32,
+    hit_max_volume_speed: f32,
+}
+
+#[derive(Deserialize)]
 pub struct Config {
+    sfx: SfxConfig,
     finish_radius: f32,
     tick_distance: f32,
     editor: EditorConfig,
@@ -267,6 +293,20 @@ pub struct Game {
     current_level: usize,
     draw_insides: bool,
     finished: bool,
+    scale_up_sfx: geng::SoundEffect,
+    scale_down_sfx: geng::SoundEffect,
+}
+
+trait SoundExt {
+    fn play_with_volume(&self, volume: f32) -> geng::SoundEffect;
+}
+
+impl SoundExt for geng::Sound {
+    fn play_with_volume(&self, volume: f32) -> geng::SoundEffect {
+        let mut eff = self.play();
+        eff.set_volume(volume);
+        eff
+    }
 }
 
 impl Game {
@@ -279,6 +319,10 @@ impl Game {
         let config: Config = file::load_detect(run_dir().join("assets").join("config.toml"))
             .await
             .unwrap();
+        geng.audio()
+            .master_volume()
+            .set_value(config.sfx.master_volume);
+        assets.music.play().set_volume(config.sfx.music_volume);
 
         geng.window().set_cursor_type(geng::CursorType::Custom {
             image: geng
@@ -326,8 +370,6 @@ impl Game {
                 r#static: 0.0,
                 scale_origin: vec2::ZERO,
             }),
-            assets,
-            config,
             editor_mode: false,
             egui: Rc::new(RefCell::new(EguiGeng::new(geng))),
             cli,
@@ -335,6 +377,10 @@ impl Game {
             current_level: 0,
             draw_insides: true,
             finished: false,
+            scale_up_sfx: assets.sfx.scale_up.play_with_volume(0.0),
+            scale_down_sfx: assets.sfx.scale_down.play_with_volume(0.0),
+            assets,
+            config,
         };
         result.setup_level();
         result
@@ -350,9 +396,17 @@ impl Game {
 
     fn next_level(&mut self) {
         if self.current_level + 1 >= self.levels.list.len() {
+            self.assets
+                .sfx
+                .win
+                .play_with_volume(self.config.sfx.win_volume);
             self.finished = true;
             return;
         }
+        self.assets
+            .sfx
+            .level
+            .play_with_volume(self.config.sfx.level_volume);
         self.current_level += 1;
         self.setup_level();
     }
@@ -477,15 +531,18 @@ impl Game {
             } else {
                 self.config.player.radius
             };
-            let player_scaling_speed =
-                (target_radius - player.radius) * self.config.player.scaling_speed;
-            if player_scaling_speed.abs() > self.config.r#static.max_vel {
+            let scaling_speed = (target_radius - player.radius) * self.config.player.scaling_speed;
+            self.scale_up_sfx
+                .set_volume((scaling_speed / self.config.sfx.scaling_max_volume).clamp(0.0, 1.0));
+            self.scale_down_sfx
+                .set_volume((-scaling_speed / self.config.sfx.scaling_max_volume).clamp(0.0, 1.0));
+            if scaling_speed.abs() > self.config.r#static.max_vel {
                 player.r#static = 0.0;
             }
             let old_radius = player.radius;
             let scale_origin = player.pos + (cursor_pos - player.pos).clamp_len(..=player.radius);
             player.scale_origin = scale_origin;
-            let new_radius = (player.radius + player_scaling_speed * delta_time)
+            let new_radius = (player.radius + scaling_speed * delta_time)
                 .clamp(self.config.player.min_radius, self.config.player.max_radius);
             player.pos = scale_origin + (player.pos - scale_origin) * new_radius / old_radius;
             player.radius = new_radius;
@@ -496,11 +553,20 @@ impl Game {
                     let penetration = player.radius - to.distance;
                     player.pos += to.normal * penetration;
                     player.radius -= penetration;
-                    let vel_at_collision_point = player.vel
-                        + player_scaling_speed * (to.closest_point - scale_origin) / old_radius;
+                    let vel_at_collision_point =
+                        player.vel + scaling_speed * (to.closest_point - scale_origin) / old_radius;
                     let normal_vel = vec2::dot(vel_at_collision_point, to.normal);
                     if normal_vel < 0.0 {
                         player.vel -= to.normal * normal_vel * (1.0 + self.config.bounciness);
+                        let sfx_volume =
+                            (-normal_vel / self.config.sfx.hit_max_volume_speed).clamp(0.0, 1.0);
+                        if sfx_volume > 0.1 {
+                            self.assets
+                                .sfx
+                                .hit
+                                .play_with_volume(sfx_volume * self.config.sfx.hit_volume)
+                                .set_speed(thread_rng().gen_range(0.8..1.2));
+                        }
                     }
                     let along = to.normal.rotate_90();
                     let along_vel = vec2::dot(vel_at_collision_point, along);
@@ -522,6 +588,8 @@ impl geng::State for Game {
     fn update(&mut self, delta_time: f64) {
         let delta_time = delta_time as f32;
         if self.finished {
+            self.scale_down_sfx.set_volume(0.0);
+            self.scale_up_sfx.set_volume(0.0);
             return;
         }
         self.time += delta_time;
